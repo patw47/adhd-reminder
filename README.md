@@ -139,11 +139,11 @@ Tasks are stored in SQLite at:
 
 ## Usage
 
-**Add a task** — send a voice note or text message to Micheline on Telegram:
+**Add a task** — send a voice note or text message to your agent on Telegram:
 
 > "I need to pay the electricity bill before Friday"
 
-Micheline will confirm what she understood, detect the category, and ask for priority:
+The agent will confirm what he understood, detect the category, and ask for priority:
 
 > 💡 Got it: **Pay electricity bill** · Category: 💰 Budget
 > What's the priority?
