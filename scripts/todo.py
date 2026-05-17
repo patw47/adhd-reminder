@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 # ── Config (read from openclaw.json — no hardcoded secrets) ───────────────────
 
 def _load_config():
+    """Load bot token and chat ID from openclaw.json."""
     cfg_path = "/home/youragent/.openclaw/openclaw.json"
     with open(cfg_path) as f:
         cfg = json.load(f)
@@ -27,6 +28,8 @@ DB_PATH = "/home/youragent/.openclaw/workspace/adhd-reminder/adhd-reminder.db"
 TZ = ZoneInfo("Europe/Paris")
 UTC = ZoneInfo("UTC")
 TGAPI = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+"""Feel free to customize these intervals, emojis and labels to your liking! Just keep them in sync."""
 
 PRIORITY_INTERVALS = {
     "urgent": timedelta(hours=2),
@@ -51,12 +54,15 @@ PRIORITIES  = list(PRIORITY_INTERVALS.keys())
 # ── Timezone helpers ──────────────────────────────────────────────────────────
 
 def now_utc() -> datetime:
+    """Return current UTC time as a timezone-aware datetime."""
     return datetime.now(UTC)
 
 def now_paris() -> datetime:
+    """Return current Paris local time as a timezone-aware datetime."""
     return datetime.now(TZ)
 
 def is_night_shift(dt_paris: datetime) -> bool:
+    """Return True if the given Paris time falls in the 21:00–08:00 quiet window."""
     h = dt_paris.hour
     return h >= 21 or h < 8
 
@@ -72,6 +78,7 @@ def adjust_for_night_shift(dt_utc: datetime) -> datetime:
     return target.astimezone(UTC)
 
 def compute_next_reminder(priority: str) -> str:
+    """Return ISO-format UTC timestamp for the next reminder, adjusted for quiet hours."""
     base = now_utc() + PRIORITY_INTERVALS[priority]
     return adjust_for_night_shift(base).isoformat()
 
@@ -79,6 +86,7 @@ def compute_next_reminder(priority: str) -> str:
 # ── Telegram API ──────────────────────────────────────────────────────────────
 
 def _tg(method: str, payload: dict) -> dict | None:
+    """Send a Telegram Bot API request and return the parsed JSON response."""
     url = f"{TGAPI}/{method}"
     body = json.dumps(payload).encode()
     req = Request(url, data=body, headers={"Content-Type": "application/json"})
@@ -90,18 +98,21 @@ def _tg(method: str, payload: dict) -> dict | None:
         return None
 
 def send_message(text: str, reply_markup: dict | None = None) -> dict | None:
+    """Send an HTML-formatted message to the configured Telegram chat."""
     payload: dict = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         payload["reply_markup"] = reply_markup
     return _tg("sendMessage", payload)
 
 def answer_callback(query_id: str, text: str = "✅") -> None:
+    """Acknowledge a Telegram inline button callback query."""
     _tg("answerCallbackQuery", {"callback_query_id": query_id, "text": text})
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
 def get_db() -> sqlite3.Connection:
+    """Open (or create) the SQLite database and ensure the tasks table exists."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -124,11 +135,13 @@ def get_db() -> sqlite3.Connection:
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
 def validate(value: str, allowed: list, name: str) -> None:
+    """Exit with an error if value is not in the allowed list."""
     if value not in allowed:
         print(f"Invalid {name}: {value!r}. Allowed: {allowed}", file=sys.stderr)
         sys.exit(1)
 
 def cmd_add(text: str, category: str, priority: str) -> str:
+    """Insert a new pending task and return its UUID."""
     validate(category, CATEGORIES, "category")
     validate(priority, PRIORITIES, "priority")
     conn = get_db()
@@ -143,6 +156,7 @@ def cmd_add(text: str, category: str, priority: str) -> str:
     return task_id
 
 def cmd_add_draft(text: str, category: str) -> str:
+    """Insert a draft task (no priority yet) and return its UUID."""
     validate(category, CATEGORIES, "category")
     conn = get_db()
     task_id = str(uuid.uuid4())
@@ -155,6 +169,7 @@ def cmd_add_draft(text: str, category: str) -> str:
     return task_id
 
 def cmd_confirm_priority(task_id: str, priority: str) -> None:
+    """Promote a draft to pending by setting its priority and first reminder time."""
     validate(priority, PRIORITIES, "priority")
     conn = get_db()
     conn.execute(
@@ -165,12 +180,14 @@ def cmd_confirm_priority(task_id: str, priority: str) -> None:
     conn.close()
 
 def cmd_mark_done(task_id: str) -> None:
+    """Mark a task as done."""
     conn = get_db()
     conn.execute("UPDATE tasks SET status='done' WHERE id=?", (task_id,))
     conn.commit()
     conn.close()
 
 def cmd_snooze(task_id: str) -> None:
+    """Snooze a task by rescheduling its next reminder based on its priority interval."""
     conn = get_db()
     row = conn.execute("SELECT priority FROM tasks WHERE id=?", (task_id,)).fetchone()
     if row and row["priority"]:
@@ -183,6 +200,7 @@ def cmd_snooze(task_id: str) -> None:
     conn.close()
 
 def cmd_list(pending_only: bool = False, category: str | None = None) -> list:
+    """Return tasks as a list of dicts, optionally filtered by status and category."""
     conn = get_db()
     q = "SELECT * FROM tasks WHERE 1=1"
     params: list = []
@@ -197,6 +215,7 @@ def cmd_list(pending_only: bool = False, category: str | None = None) -> list:
     return [dict(r) for r in rows]
 
 def cmd_find(text: str) -> list:
+    """Return non-done tasks whose text contains the given keyword (case-insensitive)."""
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM tasks WHERE status IN ('pending','snoozed','draft') "
@@ -210,6 +229,9 @@ def cmd_find(text: str) -> list:
 # ── Telegram senders ──────────────────────────────────────────────────────────
 
 def cmd_send_priority_keyboard(task_id: str, description: str) -> None:
+    """Send a Telegram message with inline priority buttons for a draft task. 
+       You can define as many priority levels as you want, 
+       just make sure to keep PRIORITY_INTERVALS, PRIORITY_EMOJI and PRIORITY_LABEL in sync."""
     text = f"📝 <b>Task logged:</b>\n{description}\n\nWhat priority?"
     keyboard = {"inline_keyboard": [[
         {"text": "🔴 Urgent", "callback_data": f"adhd:p:{task_id}:urgent"},
@@ -220,6 +242,7 @@ def cmd_send_priority_keyboard(task_id: str, description: str) -> None:
     send_message(text, reply_markup=keyboard)
 
 def _send_reminder(task: dict) -> None:
+    """Send a Telegram reminder for a task with Done/Later inline buttons."""
     created = datetime.fromisoformat(task["created_at"]).astimezone(TZ)
     delta = now_paris() - created
     days = delta.days
@@ -243,6 +266,7 @@ def _send_reminder(task: dict) -> None:
     send_message(text, reply_markup=keyboard)
 
 def cmd_check_reminders() -> None:
+    """Send reminders for all overdue tasks; skip if currently in quiet hours."""
     if is_night_shift(now_paris()):
         return
     now = now_utc().isoformat()
@@ -264,6 +288,7 @@ def cmd_check_reminders() -> None:
     conn.close()
 
 def cmd_daily_recap() -> None:
+    """Send the morning recap message listing all pending tasks grouped by category."""
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM tasks WHERE status IN ('pending','snoozed') ORDER BY category, priority",
@@ -287,6 +312,7 @@ def cmd_daily_recap() -> None:
     send_message("\n".join(lines))
 
 def cmd_handle_callback(data: str, query_id: str | None = None) -> None:
+    """Dispatch an inline button callback (done/snooze/priority) and send confirmation."""
     parts = data.split(":")
     if len(parts) < 3 or parts[0] != "adhd":
         print(f"Unknown callback: {data!r}", file=sys.stderr)
@@ -342,6 +368,7 @@ def cmd_handle_callback(data: str, query_id: str | None = None) -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
+    """Parse CLI arguments and dispatch to the appropriate command function."""
     p = argparse.ArgumentParser(description="ADHD reminder — SQLite + Telegram")
     p.add_argument("--add",                    action="store_true")
     p.add_argument("--add-draft",              action="store_true")

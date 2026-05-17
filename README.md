@@ -58,9 +58,10 @@ openclaw config validate
 ```
 
 ### 3. Copy the skill into your OpenClaw workspace
+Note : Replace "youragent" in path with the actual name of your agent
 
 ```bash
-cp -r adhd-reminder /home/micheline/.openclaw/workspace/skills/
+cp -r adhd-reminder /home/youragent/.openclaw/workspace/skills/
 ```
 
 ### 4. Enable the skill in openclaw.json
@@ -83,15 +84,16 @@ The skill includes a `remind.sh` script that must run every 30 minutes
 to check pending tasks and send Telegram reminders.
 
 Add it to the agent's crontab:
+Note : Replace "youragent" with the actual name of your agent
 
 ```bash
-sudo -u micheline crontab -e
+sudo -u youragent crontab -e
 ```
 
 Add this line:
 
 ```
-*/30 * * * * /home/micheline/.openclaw/workspace/skills/adhd-reminder/scripts/remind.sh
+*/30 * * * * /home/youragent/.openclaw/workspace/skills/adhd-reminder/scripts/remind.sh
 ```
 
 ### 6. Set up the daily recap
@@ -99,7 +101,7 @@ Add this line:
 The daily recap runs at 08:00 Paris time. Add a second cron entry:
 
 ```
-0 8 * * * TZ=Europe/Paris /home/micheline/.openclaw/workspace/skills/adhd-reminder/scripts/remind.sh --daily-recap
+0 8 * * * TZ=Europe/Paris /home/youragent/.openclaw/workspace/skills/adhd-reminder/scripts/remind.sh --daily-recap
 ```
 
 ### 7. Restart OpenClaw
